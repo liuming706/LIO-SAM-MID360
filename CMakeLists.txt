@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(lio_sam)
 
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS "-std=c++11")
+set(CMAKE_CXX_FLAGS "-std=c++17")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g -pthread")
 
 find_package(catkin REQUIRED COMPONENTS
@@ -23,9 +23,12 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(OpenMP REQUIRED)
 find_package(PCL REQUIRED QUIET)
+set(OpenCV_DIR "/home/lumen/Downloads/opencv-3.4.5/build")
+
 find_package(OpenCV REQUIRED QUIET)
 find_package(GTSAM REQUIRED QUIET)
-find_package(Boost REQUIRED COMPONENTS timer)
+find_package(Boost REQUIRED COMPONENTS
+serialization timer thread chrono)
 
 add_message_files(
   DIRECTORY msg
@@ -66,16 +69,18 @@ include_directories(
 	include
 	${catkin_INCLUDE_DIRS}
 	${PCL_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
 	${GTSAM_INCLUDE_DIR}
+        ${Boost_INCLUDE_DIRS}
 )
 
 # link directories
 link_directories(
 	include
 	${PCL_LIBRARY_DIRS}
-  ${OpenCV_LIBRARY_DIRS}
-  ${GTSAM_LIBRARY_DIRS}
+        ${OpenCV_LIBRARY_DIRS}
+        ${GTSAM_LIBRARY_DIRS}
+        ${Boost_INCLUDE_DIRS}
 )
 
 ###########

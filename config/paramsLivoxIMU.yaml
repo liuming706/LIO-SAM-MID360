@@ -40,7 +40,8 @@ lio_sam:
   imuGravity: 9.8035
   imuRPYWeight: 0.00
 
-  extrinsicTrans: [0.0, 0.0, 0]
+  extrinsicTrans: [-0.011, -0.02329, 0.04412]
+  #extrinsicTrans: [0, 0, 0]
   extrinsicRot: [1, 0, 0,
                   0, 1, 0,
                   0, 0, 1]
