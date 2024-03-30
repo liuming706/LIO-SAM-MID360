@@ -12,18 +12,25 @@
 
 Livox MID360雷达数据请使用览沃自定义点云数据`CustomMsg`，即LIVOX ROS驱动请运行`livox_lidar_msg.launch`。
 
+## BUILD-pre
+
+```bash
+sudo apt install ros-noetic-gtsam
+sudo apt install libopencv-dev
+sudo apt install libignition-math4-dev
+```
 ## Run
 
-使用自带的6轴IMU请运行
+使用自带的6轴IMU请运行 (真实环境)
 
 ```
 roslaunch lio_sam run6axis.launch
 ```
 
-使用9轴IMU请运行
+使用9轴IMU请运行 (gazebo 仿真环境)
 
 ```
-roslaunch lio_sam run9axis.launch
+roslaunch lio_sam run9axis.launch 
 ```
 
 ## Test

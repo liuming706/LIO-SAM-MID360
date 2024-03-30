@@ -5,7 +5,8 @@
 
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
-#include <opencv/cv.h>
+//#include <opencv/cv.h>
+
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/crop_box.h>
@@ -49,7 +50,9 @@
 #include <string>
 #include <thread>
 #include <vector>
-
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc/types_c.h>
+#include <opencv2/imgproc.hpp>
 #include "livox_ros_driver2/CustomMsg.h"
 using namespace std;
 
