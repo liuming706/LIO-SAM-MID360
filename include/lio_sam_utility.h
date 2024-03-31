@@ -1,12 +1,12 @@
-#pragma once
-#ifndef _UTILITY_LIDAR_ODOMETRY_H_
-#define _UTILITY_LIDAR_ODOMETRY_H_
+#ifndef LIO_SAM_UTILITY_H_
+#define LIO_SAM_UTILITY_H_
 #define PCL_NO_PRECOMPILE
 
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 //#include <opencv/cv.h>
 
+#include <opencv2/imgproc/types_c.h>
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/crop_box.h>
@@ -44,15 +44,15 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/opencv.hpp>
 #include <pcl/search/impl/search.hpp>
 #include <queue>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-#include <opencv2/opencv.hpp>
-#include <opencv2/imgproc/types_c.h>
-#include <opencv2/imgproc.hpp>
+
 #include "livox_ros_driver2/CustomMsg.h"
 using namespace std;
 

@@ -1,5 +1,5 @@
 #include "lio_sam/cloud_info.h"
-#include "utility.h"
+#include "lio_sam_utility.h"
 
 struct VelodynePointXYZIRT {
   PCL_ADD_POINT4D
@@ -102,15 +102,18 @@ class ImageProjection : public ParamServer {
     subImu = nh.subscribe<sensor_msgs::Imu>(imuTopic, 2000,
                                             &ImageProjection::imuHandler, this,
                                             ros::TransportHints().tcpNoDelay());
+    // 订阅 imu 推演的 odom
     subOdom = nh.subscribe<nav_msgs::Odometry>(
         odomTopic + "_incremental", 2000, &ImageProjection::odometryHandler,
         this, ros::TransportHints().tcpNoDelay());
+    // 订阅激光雷达发布的原始点云
     subLaserCloud = nh.subscribe<livox_ros_driver2::CustomMsg>(
         pointCloudTopic, 5, &ImageProjection::cloudHandler, this,
         ros::TransportHints().tcpNoDelay());
-
+    // 发布去畸变后的点云
     pubExtractedCloud = nh.advertise<sensor_msgs::PointCloud2>(
         "lio_sam/deskew/cloud_deskewed", 1);
+    // 发布去畸变后的点云处理辅助信息
     pubLaserCloudInfo =
         nh.advertise<lio_sam::cloud_info>("lio_sam/deskew/cloud_info", 1);
 
@@ -190,12 +193,15 @@ class ImageProjection : public ParamServer {
   }
 
   void cloudHandler(const livox_ros_driver2::CustomMsgConstPtr &laserCloudMsg) {
+    // 将 laserCloudMsg 转变为 pcl::PointCloud<PointXYZIRT> 类型后缓存到
+    // laserCloudIn
     if (!cachePointCloud(laserCloudMsg)) return;
-
+    // 计算用于去运动畸变的数据信息，初始化 cloudInfo 位姿初始信息
     if (!deskewInfo()) return;
-
+    // 点云去畸变后填充 rangeMat 和 fullCloud
     projectPointCloud();
-
+    // 有效点云装入一维数组 extractedCloud，
+    // 并将每个环的起始、结束点索引装至 cloudInfo
     cloudExtraction();
 
     publishClouds();
@@ -534,7 +540,7 @@ class ImageProjection : public ParamServer {
       if (columnIdn < 0 || columnIdn >= Horizon_SCAN) continue;
 
       if (rangeMat.at<float>(rowIdn, columnIdn) != FLT_MAX) continue;
-
+      // 利用 imu 和 imu 推演的 odom 去运动畸变
       thisPoint = deskewPoint(&thisPoint, laserCloudIn->points[i].time);
 
       rangeMat.at<float>(rowIdn, columnIdn) = range;
