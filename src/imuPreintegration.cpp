@@ -195,10 +195,12 @@ class IMUPreintegration : public ParamServer {
   int key = 1;
 
   // T_bl: tramsform points from lidar frame to imu frame
+  // 雷达坐标系到（新）IMU坐标系的平移变换矩阵
   gtsam::Pose3 imu2Lidar =
       gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0),
                    gtsam::Point3(-extTrans.x(), -extTrans.y(), -extTrans.z()));
   // T_lb: tramsform points from imu frame to lidar frame
+  //（新）IMU坐标系到雷达坐标系的平移变换矩阵
   gtsam::Pose3 lidar2Imu =
       gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0),
                    gtsam::Point3(extTrans.x(), extTrans.y(), extTrans.z()));
@@ -211,7 +213,7 @@ class IMUPreintegration : public ParamServer {
         "lio_sam/mapping/odometry_incremental", 5,
         &IMUPreintegration::odometryHandler, this,
         ros::TransportHints().tcpNoDelay());
-
+    // 发布 imu 推演的里程计
     pubImuOdometry =
         nh.advertise<nav_msgs::Odometry>(odomTopic + "_incremental", 2000);
 

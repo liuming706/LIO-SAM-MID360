@@ -107,3 +107,8 @@ target_link_libraries(${PROJECT_NAME}_mapOptmization Boost::timer ${catkin_LIBRA
 add_executable(${PROJECT_NAME}_imuPreintegration src/imuPreintegration.cpp)
 add_dependencies(${PROJECT_NAME}_imuPreintegration ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_generate_messages_cpp livox_ros_driver2 livox_ros_driver2_gencpp)
 target_link_libraries(${PROJECT_NAME}_imuPreintegration Boost::timer ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} gtsam)
+
+# test_gtsam
+add_executable(${PROJECT_NAME}_test_gtsam src/test_gtsam.cpp)
+add_dependencies(${PROJECT_NAME}_test_gtsam ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_generate_messages_cpp livox_ros_driver2 livox_ros_driver2_gencpp)
+target_link_libraries(${PROJECT_NAME}_test_gtsam Boost::timer ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} gtsam)

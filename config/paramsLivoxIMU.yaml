@@ -39,7 +39,7 @@ lio_sam:
   imuGyrBiasN: 0.04
   imuGravity: 9.8035
   imuRPYWeight: 0.00
-
+  # imu 坐标系到 lidar 坐标系的变换矩阵
   extrinsicTrans: [-0.011, -0.02329, 0.04412]
   #extrinsicTrans: [0, 0, 0]
   extrinsicRot: [1, 0, 0,
