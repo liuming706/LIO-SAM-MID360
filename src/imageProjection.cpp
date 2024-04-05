@@ -521,6 +521,7 @@ class ImageProjection : public ParamServer {
       if (range < lidarMinRange || range > lidarMaxRange) continue;
 
       int rowIdn = laserCloudIn->points[i].ring;
+      // 环数滤波
       if (rowIdn < 0 || rowIdn >= N_SCAN) continue;
 
       if (rowIdn % downsampleRate != 0) continue;
@@ -554,6 +555,7 @@ class ImageProjection : public ParamServer {
     int count = 0;
     // extract segmented cloud for lidar odometry
     for (int i = 0; i < N_SCAN; ++i) {
+      // 记录每根扫描线起始第5个激光点在一维数组中的索引
       cloudInfo.startRingIndex[i] = count - 1 + 5;
 
       for (int j = 0; j < Horizon_SCAN; ++j) {
@@ -568,6 +570,7 @@ class ImageProjection : public ParamServer {
           ++count;
         }
       }
+      // 记录每根扫描线起始第5个激光点在一维数组中的索引
       cloudInfo.endRingIndex[i] = count - 1 - 5;
     }
   }
