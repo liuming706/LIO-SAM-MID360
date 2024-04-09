@@ -7,8 +7,8 @@ lio_sam:
   gpsTopic: "odometry/gpsz"                   # GPS odometry topic from navsat, see module_navsat.launch file
 
   # Frames
-  lidarFrame: "base_link"
-  baselinkFrame: "base_link"
+  lidarFrame: "livox"                # 机器人的 frame_id
+  baselinkFrame: "base_link"             # 激光雷达的 frame_id
   odometryFrame: "odom"
   mapFrame: "map"
 
@@ -60,6 +60,7 @@ lio_sam:
   extrinsicRot: [1, 0, 0,
                   0, 1, 0,
                   0, 0, 1]
+  # imu_fram在imu的地磁坐标系下的姿态描述
   extrinsicRPY: [1, 0, 0,
                   0, 1, 0,
                   0, 0, 1]
@@ -84,15 +85,15 @@ lio_sam:
   mappingProcessInterval: 0.15                  # seconds, regulate mapping frequency
 
   # Surrounding map
-  surroundingkeyframeAddingDistThreshold: 0.5   # meters, regulate keyframe adding threshold
-  surroundingkeyframeAddingAngleThreshold: 0.2  # radians, regulate keyframe adding threshold
-  surroundingKeyframeDensity: 0.5               # meters, downsample surrounding keyframe poses   
-  surroundingKeyframeSearchRadius: 20.0         # meters, within n meters scan-to-map optimization (when loop closure disabled)
+  surroundingkeyframeAddingDistThreshold: 0.5   # meters, regulate keyframe adding threshold ,运动过滤移动步长
+  surroundingkeyframeAddingAngleThreshold: 0.2  # radians, regulate keyframe adding threshold，运动过滤角度步长
+  surroundingKeyframeDensity: 0.5               # meters, downsample surrounding keyframe poses，最近关键帧降采样
+  surroundingKeyframeSearchRadius: 20.0         # meters, within n meters scan-to-map optimization (when loop closure disabled) 与当前帧的距离限制
 
   # Loop closure
   loopClosureEnableFlag: true
   loopClosureFrequency: 1.0                     # Hz, regulate loop closure constraint add frequency
-  surroundingKeyframeSize: 25                   # submap size (when loop closure enabled)
+  surroundingKeyframeSize: 25                   # submap size (when loop closure enabled) 未用到
   historyKeyframeSearchRadius: 10.0             # meters, key frame that is within n meters from current pose will be considerd for loop closure
   historyKeyframeSearchTimeDiff: 30.0           # seconds, key frame that is n seconds older will be considered for loop closure
   historyKeyframeSearchNum: 25                  # number of hostory key frames will be fused into a submap for loop closure

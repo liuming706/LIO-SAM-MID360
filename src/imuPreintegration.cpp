@@ -122,7 +122,9 @@ class TransformFusion : public ParamServer {
     // publish tf
     static tf::TransformBroadcaster tfOdom2BaseLink;
     tf::Transform tCur;
+    // tCur 为 lidar 在 map 下的描述
     tf::poseMsgToTF(laserOdometry.pose.pose, tCur);
+    // tCur 为 base_link 在 map 下的描述
     if (lidarFrame != baselinkFrame) tCur = tCur * lidar2Baselink;
     tf::StampedTransform odom_2_baselink = tf::StampedTransform(
         tCur, odomMsg->header.stamp, odometryFrame, baselinkFrame);
@@ -413,6 +415,7 @@ class IMUPreintegration : public ParamServer {
             sqrt(imuIntegratorOpt_->deltaTij()) * noiseModelBetweenBias)));
     // add pose factor
     gtsam::Pose3 curPose = lidarPose.compose(lidar2Imu);
+    // 激光里程计出现退化使用更大的噪声
     gtsam::PriorFactor<gtsam::Pose3> pose_factor(
         X(key), curPose, degenerate ? correctionNoise2 : correctionNoise);
     graphFactors.add(pose_factor);
@@ -454,6 +457,7 @@ class IMUPreintegration : public ParamServer {
     // repropogate
     if (!imuQueImu.empty()) {
       // reset bias use the newly optimized bias
+      // 使用 利用激光里程计优化后的零偏
       imuIntegratorImu_->resetIntegrationAndSetBias(prevBiasOdom);
       // integrate imu message from the beginning of this optimization
       for (int i = 0; i < (int)imuQueImu.size(); ++i) {
@@ -503,6 +507,7 @@ class IMUPreintegration : public ParamServer {
     sensor_msgs::Imu thisImu = imuConverter(*imu_raw);
 
     imuQueOpt.push_back(thisImu);
+    // 由于多线程竞争，此时的 imuQueImu 应该为空
     imuQueImu.push_back(thisImu);
 
     if (doneFirstOpt == false) return;
@@ -552,6 +557,7 @@ class IMUPreintegration : public ParamServer {
         thisImu.angular_velocity.y + prevBiasOdom.gyroscope().y();
     odometry.twist.twist.angular.z =
         thisImu.angular_velocity.z + prevBiasOdom.gyroscope().z();
+    //  发布到 odomTopic + "_incremental" 话题，即 odometry/imu_incremental
     pubImuOdometry.publish(odometry);
   }
 };

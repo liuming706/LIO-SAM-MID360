@@ -302,6 +302,7 @@ class ImageProjection : public ParamServer {
 
       // get roll, pitch, and yaw estimation for this scan
       if (currentImuTime <= timeScanCur)
+        // imu 的四元数形式的姿态转ROS的RPY角
         imuRPY2rosRPY(&thisImuMsg, &cloudInfo.imuRollInit,
                       &cloudInfo.imuPitchInit, &cloudInfo.imuYawInit);
 
@@ -321,6 +322,7 @@ class ImageProjection : public ParamServer {
       imuAngular2rosAngular(&thisImuMsg, &angular_x, &angular_y, &angular_z);
 
       // integrate rotation
+      // 由 imu 的角速度信息推演三轴角度变化量
       double timeDiff = currentImuTime - imuTime[imuPointerCur - 1];
       imuRotX[imuPointerCur] =
           imuRotX[imuPointerCur - 1] + angular_x * timeDiff;
@@ -490,6 +492,9 @@ class ImageProjection : public ParamServer {
     }
 
     // transform points to start
+    // TODO(LM):
+    // 对三个轴（x,y,z）的imu角速度数据的积分结果是否分别为固定轴X-Y-Z欧拉角的三个参数？
+    // 如果不是，则仅能矫正绕单轴（x或y或z）旋转产生的畸变
     Eigen::Affine3f transFinal = pcl::getTransformation(
         posXCur, posYCur, posZCur, rotXCur, rotYCur, rotZCur);
     Eigen::Affine3f transBt = transStartInverse * transFinal;

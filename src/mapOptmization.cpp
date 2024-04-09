@@ -296,6 +296,7 @@ class mapOptimization : public ParamServer {
     std::lock_guard<std::mutex> lock(mtx);
 
     static double timeLastProcessing = -1;
+    // 控制频率
     if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval) {
       timeLastProcessing = timeLaserInfoCur;
 
@@ -515,6 +516,8 @@ class mapOptimization : public ParamServer {
     ros::Rate rate(0.2);
     while (ros::ok()) {
       rate.sleep();
+      // publishGlobalmap：把当前关键帧附近1000m（默认）的关键帧找出来（其实也就是全局的了），
+      //  降采样，变换到世界系下，然后发布到 lio_sam/ mapping/map_global
       publishGlobalMap();
     }
 
@@ -628,12 +631,18 @@ class mapOptimization : public ParamServer {
     mtx.unlock();
 
     // find keys
+    // 在历史帧中搜索距离关键帧最近，时间间隔较远的关键帧（默认是30s以外，10m以内）没找到就返回，
+    // 如果找到了，结果就放在loopKeyPre当中，loopKeyCur保存最近一个关键帧
     int loopKeyCur;
     int loopKeyPre;
+    // 首先，根据接受到的时间查询点对消息构建回环
     if (detectLoopClosureExternal(&loopKeyCur, &loopKeyPre) == false)
+      //如果构建失败，则根据空间和时间距离查询当前帧的回环
       if (detectLoopClosureDistance(&loopKeyCur, &loopKeyPre) == false) return;
 
     // extract cloud
+    // 把最近一个关键帧的特征点提出来，放入cureKeyframeCloud里；
+    // 回环候选帧前后各25帧也提取出来，放入prevKeyframeCloud里
     pcl::PointCloud<PointType>::Ptr cureKeyframeCloud(
         new pcl::PointCloud<PointType>());
     pcl::PointCloud<PointType>::Ptr prevKeyframeCloud(
@@ -644,10 +653,16 @@ class mapOptimization : public ParamServer {
                             historyKeyframeSearchNum);
       if (cureKeyframeCloud->size() < 300 || prevKeyframeCloud->size() < 1000)
         return;
+      // 把prevKeyframeCloud发布出去，名为lio_sam/mapping/icp_loop_closure_history/cloud
       if (pubHistoryKeyFrames.getNumSubscribers() != 0)
         publishCloud(pubHistoryKeyFrames, prevKeyframeCloud, timeLaserInfoStamp,
                      odometryFrame);
     }
+
+    // 调用pcl库的icp轮子，设定阈值，参数，用setInputSource，setInputTarget传入两个点云，
+    // 用align对齐。成功阈值设定为0.3，成功则存在icp.getFinalTransformation里面。
+    // 把当前关键帧的点云，用这个结果icp.getFinalTransformation，
+    // 转换以后，以lio_sam/mapping/icp_loop_closure_corrected_cloud发布出去
 
     // ICP Settings
     static pcl::IterativeClosestPoint<PointType, PointType> icp;
@@ -663,12 +678,13 @@ class mapOptimization : public ParamServer {
     pcl::PointCloud<PointType>::Ptr unused_result(
         new pcl::PointCloud<PointType>());
     icp.align(*unused_result);
-
+    // getFitnessScore: mean of squared distances from the source to the target
     if (icp.hasConverged() == false ||
         icp.getFitnessScore() > historyKeyframeFitnessScore)
       return;
 
     // publish corrected cloud
+    // TODO(LM): icp.getFinalTransformation 获得的是？
     if (pubIcpKeyFrames.getNumSubscribers() != 0) {
       pcl::PointCloud<PointType>::Ptr closed_cloud(
           new pcl::PointCloud<PointType>());
@@ -679,6 +695,8 @@ class mapOptimization : public ParamServer {
     }
 
     // Get pose transformation
+    // 把当前帧的的位姿用icp.getFinalTransformation结果校正一下，
+    // 把pair<当前，回环>，间隔位姿，噪声用队列存起来，等待addLoopFactor来调用，即上面的1.5.4部分
     float x, y, z, roll, pitch, yaw;
     Eigen::Affine3f correctionLidarFrame;
     correctionLidarFrame = icp.getFinalTransformation();
@@ -703,6 +721,8 @@ class mapOptimization : public ParamServer {
 
     // Add pose constraint
     mtx.lock();
+    // 把当前帧的的位姿用icp.getFinalTransformation结果校正一下，
+    // 把pair<当前，回环>，间隔位姿，噪声用队列存起来，等待addLoopFactor来调用
     loopIndexQueue.push_back(make_pair(loopKeyCur, loopKeyPre));
     loopPoseQueue.push_back(poseFrom.between(poseTo));
     loopNoiseQueue.push_back(constraintNoise);
@@ -784,6 +804,7 @@ class mapOptimization : public ParamServer {
     if (loopKeyCur == loopKeyPre) return false;
 
     auto it = loopIndexContainer.find(loopKeyCur);
+    // 已经构建loopKeyCur的回环约束返回 false
     if (it != loopIndexContainer.end()) return false;
 
     *latestID = loopKeyCur;
@@ -884,7 +905,7 @@ class mapOptimization : public ParamServer {
       transformTobeMapped[0] = cloudInfo.imuRollInit;
       transformTobeMapped[1] = cloudInfo.imuPitchInit;
       transformTobeMapped[2] = cloudInfo.imuYawInit;
-
+      // 如果不使用IMU的航向角
       if (!useImuHeadingInitialization) transformTobeMapped[2] = 0;
 
       lastImuTransformation = pcl::getTransformation(
@@ -896,6 +917,7 @@ class mapOptimization : public ParamServer {
     // use imu pre-integration estimation for pose guess
     static bool lastImuPreTransAvailable = false;
     static Eigen::Affine3f lastImuPreTransformation;
+    // imu 推演的里程计可用
     if (cloudInfo.odomAvailable == true) {
       Eigen::Affine3f transBack = pcl::getTransformation(
           cloudInfo.initialGuessX, cloudInfo.initialGuessY,
@@ -904,11 +926,15 @@ class mapOptimization : public ParamServer {
       if (lastImuPreTransAvailable == false) {
         lastImuPreTransformation = transBack;
         lastImuPreTransAvailable = true;
+        // 此刻的 lidar_frame 为 map 原点坐标系
       } else {
         Eigen::Affine3f transIncre =
             lastImuPreTransformation.inverse() * transBack;
         Eigen::Affine3f transTobe = trans2Affine3f(transformTobeMapped);
+        // transIncre： imu 预积分推演的位姿增量
         Eigen::Affine3f transFinal = transTobe * transIncre;
+        // pcl::getTranslationAndEulerAngles
+        // 得到的欧拉角为固定轴X-Y-Z欧拉角
         pcl::getTranslationAndEulerAngles(
             transFinal, transformTobeMapped[3], transformTobeMapped[4],
             transformTobeMapped[5], transformTobeMapped[0],
@@ -931,6 +957,7 @@ class mapOptimization : public ParamServer {
       Eigen::Affine3f transIncre = lastImuTransformation.inverse() * transBack;
 
       Eigen::Affine3f transTobe = trans2Affine3f(transformTobeMapped);
+      // transIncre 只含有旋转增量
       Eigen::Affine3f transFinal = transTobe * transIncre;
       pcl::getTranslationAndEulerAngles(
           transFinal, transformTobeMapped[3], transformTobeMapped[4],
@@ -982,6 +1009,7 @@ class mapOptimization : public ParamServer {
     for (auto& pt : surroundingKeyPosesDS->points) {
       kdtreeSurroundingKeyPoses->nearestKSearch(pt, 1, pointSearchInd,
                                                 pointSearchSqDis);
+      //相当于是把下采样以后的点的强度，换成是原始点强度（索引）
       pt.intensity = cloudKeyPoses3D->points[pointSearchInd[0]].intensity;
     }
 
@@ -994,7 +1022,7 @@ class mapOptimization : public ParamServer {
       else
         break;
     }
-
+    // 更新一些最近的关键帧处的角点和面点点云
     extractCloud(surroundingKeyPosesDS);
   }
 
@@ -1096,11 +1124,14 @@ class mapOptimization : public ParamServer {
           cy += laserCloudCornerFromMapDS->points[pointSearchInd[j]].y;
           cz += laserCloudCornerFromMapDS->points[pointSearchInd[j]].z;
         }
+        // 五个最近邻点的均值
         cx /= 5;
         cy /= 5;
         cz /= 5;
 
         float a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
+        //  五个最近邻点的协方差矩阵 matA1
+        //  matD1，matV1 分别为 matA1 的特征值和特征向量
         for (int j = 0; j < 5; j++) {
           float ax =
               laserCloudCornerFromMapDS->points[pointSearchInd[j]].x - cx;
@@ -1134,18 +1165,20 @@ class mapOptimization : public ParamServer {
         matA1.at<float>(2, 2) = a33;
 
         cv::eigen(matA1, matD1, matV1);
-
+        // 如果最大特征值大于次大特征值的3倍，那么就认为构成线
         if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1)) {
           float x0 = pointSel.x;
           float y0 = pointSel.y;
           float z0 = pointSel.z;
+          // 一旦发现构成线，那么就在均值沿着最大特征向量方向（把它看成线的方向）前后各取一个点（+-0.1
+          // x 方向）
           float x1 = cx + 0.1 * matV1.at<float>(0, 0);
           float y1 = cy + 0.1 * matV1.at<float>(0, 1);
           float z1 = cz + 0.1 * matV1.at<float>(0, 2);
           float x2 = cx - 0.1 * matV1.at<float>(0, 0);
           float y2 = cy - 0.1 * matV1.at<float>(0, 1);
           float z2 = cz - 0.1 * matV1.at<float>(0, 2);
-
+          // l01叉乘l02的模，即三点构成的三角形面积的两倍
           float a012 =
               sqrt(((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) *
                        ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) +
@@ -1153,10 +1186,11 @@ class mapOptimization : public ParamServer {
                        ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) +
                    ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)) *
                        ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)));
-
+          // l12的模长
           float l12 = sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) +
                            (z1 - z2) * (z1 - z2));
-
+          // (la,lb,lc) = （l21 叉乘（l01叉乘l02）/（l12的模*l01叉乘l02的模）
+          // 即残差的单位方向向量
           float la =
               ((y1 - y2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) +
                (z1 - z2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1))) /
@@ -1171,9 +1205,10 @@ class mapOptimization : public ParamServer {
               -((x1 - x2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) +
                 (y1 - y2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) /
               a012 / l12;
-
+          // pointSel到直线l12的距离
+          // 即残差的大小
           float ld2 = a012 / l12;
-
+          // 距离ld2越大，s越小
           float s = 1 - 0.9 * fabs(ld2);
 
           coeff.x = s * la;
@@ -1183,7 +1218,9 @@ class mapOptimization : public ParamServer {
 
           if (s > 0.1) {
             laserCloudOriCornerVec[i] = pointOri;
+            // 保存点到直线的鲁棒距离和鲁棒向量
             coeffSelCornerVec[i] = coeff;
+            // laserCloudOriCornerFlag 代表当前点 X0 已经找到对应的线
             laserCloudOriCornerFlag[i] = true;
           }
         }
@@ -1219,22 +1256,23 @@ class mapOptimization : public ParamServer {
           matA0(j, 1) = laserCloudSurfFromMapDS->points[pointSearchInd[j]].y;
           matA0(j, 2) = laserCloudSurfFromMapDS->points[pointSearchInd[j]].z;
         }
-
+        // QR 分解求解 A0X0=-1 ，即将AX+BY+CZ+D=0 =>(A/D)X+(B/D)Y+(C/D)Z+1=0
         matX0 = matA0.colPivHouseholderQr().solve(matB0);
 
-        float pa = matX0(0, 0);
-        float pb = matX0(1, 0);
-        float pc = matX0(2, 0);
+        float pa = matX0(0, 0);  // A/D
+        float pb = matX0(1, 0);  // B/D
+        float pc = matX0(2, 0);  // C/D
         float pd = 1;
 
         float ps = sqrt(pa * pa + pb * pb + pc * pc);
         pa /= ps;
         pb /= ps;
         pc /= ps;
-        pd /= ps;
+        pd /= ps;  // 1/sqrt((A*A+B*B+C*C)/D*D)
 
         bool planeValid = true;
         for (int j = 0; j < 5; j++) {
+          // 点的到直线的距离，下式等价于 |AX+BY+CZ+D|/sqrt((A*A+B*B+C*C)
           if (fabs(pa * laserCloudSurfFromMapDS->points[pointSearchInd[j]].x +
                    pb * laserCloudSurfFromMapDS->points[pointSearchInd[j]].y +
                    pc * laserCloudSurfFromMapDS->points[pointSearchInd[j]].z +
@@ -1246,12 +1284,13 @@ class mapOptimization : public ParamServer {
 
         if (planeValid) {
           float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
-
+          // 在同样残差大小的情况下， 选择的点距离 lidar 中心越远，s 越大
+          // 即远处的点允许更大的残差
           float s = 1 - 0.9 * fabs(pd2) /
                             sqrt(sqrt(pointOri.x * pointOri.x +
                                       pointOri.y * pointOri.y +
                                       pointOri.z * pointOri.z));
-
+          // (pa,pb,pc) 为平面单位法向量，pd2 为残差的大小
           coeff.x = s * pa;
           coeff.y = s * pb;
           coeff.z = s * pc;
@@ -1288,28 +1327,44 @@ class mapOptimization : public ParamServer {
     std::fill(laserCloudOriSurfFlag.begin(), laserCloudOriSurfFlag.end(),
               false);
   }
-
+  // 参考 https://blog.csdn.net/weixin_37835423/article/details/111587379
+  // 和 https://zhuanlan.zhihu.com/p/444684546
+  // 欧拉角为非固定轴Y—X-Z欧拉角
   bool LMOptimization(int iterCount) {
-    // This optimization is from the original loam_velodyne by Ji Zhang, need to
-    // cope with coordinate transformation lidar <- camera      ---     camera
-    // <- lidar x = z                ---     x = y y = x                --- y =
-    // z z = y                ---     z = x roll = yaw           ---     roll =
-    // pitch pitch = roll         ---     pitch = yaw yaw = pitch          ---
-    // yaw = roll
-
+    /*
+     This optimization is from the original loam_velodyne by Ji Zhang,
+     need to cope with coordinate transformation（等价代换转换欧拉角形式）
+     lidar <- camera      ---     camera <- lidar
+     x = z                ---     x = y
+     y = x                ---     y = z
+     z = y                ---     z = x
+     roll = yaw           ---     roll = pitch
+     pitch = roll         ---     pitch = yaw
+     yaw = pitch          ---     yaw = roll
+    */
+    // camera <- lidar <=> 非固定轴 Z-Y-X -> 非固定轴 Y-X-Z
+    // 转换到camera后
+    // R = R_yaw * R_pitch * R_roll （原始）= R_ry * R_rx * R_rz
+    //  = |cry  0 sry|   |1 0   0   |   |crz -srz 0|
+    //    |0    1 0  | * |0 crx -srx| * |srz crz  0|
+    //    |-sry 0 cry|   |0 srx crx |   |0   0    1|
+    //  = |crycrz+srxsrysrz  srxsrycrz-crysrz  crxsry|
+    //    |crxsrz            crxcrz            -srx  |
+    //    |srxcrysrz-srycrz  srysrz+srxcrycrz  crxcry|
     // lidar -> camera
-    float srx = sin(transformTobeMapped[1]);
-    float crx = cos(transformTobeMapped[1]);
-    float sry = sin(transformTobeMapped[2]);
-    float cry = cos(transformTobeMapped[2]);
-    float srz = sin(transformTobeMapped[0]);
-    float crz = cos(transformTobeMapped[0]);
+    float srx = sin(transformTobeMapped[1]);  // 对应上面原理部分的sin(rx)
+    float crx = cos(transformTobeMapped[1]);  // 对应上面原理部分的cos(rx)
+    float sry = sin(transformTobeMapped[2]);  // 对应上面原理部分的sin(ry)
+    float cry = cos(transformTobeMapped[2]);  // 对应上面原理部分的cos(ry)
+    float srz = sin(transformTobeMapped[0]);  // 对应上面原理部分的sin(rz)
+    float crz = cos(transformTobeMapped[0]);  // 对应上面原理部分的cos(rz)
 
     int laserCloudSelNum = laserCloudOri->size();
     if (laserCloudSelNum < 50) {
       return false;
     }
-
+    // 高斯牛顿迭代方程 JTJX=-JTf
+    // AtA, AtB, X 分别对应高斯牛顿迭代方程中的 JTJ，f,-JTF
     cv::Mat matA(laserCloudSelNum, 6, CV_32F, cv::Scalar::all(0));
     cv::Mat matAt(6, laserCloudSelNum, CV_32F, cv::Scalar::all(0));
     cv::Mat matAtA(6, 6, CV_32F, cv::Scalar::all(0));
@@ -1356,30 +1411,34 @@ class mapOptimization : public ParamServer {
                   ((sry * srz + cry * crz * srx) * pointOri.x +
                    (crz * sry - cry * srx * srz) * pointOri.y) *
                       coeff.z;
-      // camera -> lidar
-      matA.at<float>(i, 0) = arz;
-      matA.at<float>(i, 1) = arx;
-      matA.at<float>(i, 2) = ary;
-      matA.at<float>(i, 3) = coeff.z;
-      matA.at<float>(i, 4) = coeff.x;
-      matA.at<float>(i, 5) = coeff.y;
-      matB.at<float>(i, 0) = -coeff.intensity;
+      // camera -> lidar <=> 非固定轴 Y-X-Z -> 非固定轴 Z-Y-X
+      matA.at<float>(i, 0) = arz;               // Jrz
+      matA.at<float>(i, 1) = arx;               // Jrx
+      matA.at<float>(i, 2) = ary;               // Jry
+      matA.at<float>(i, 3) = coeff.z;           // Jtz
+      matA.at<float>(i, 4) = coeff.x;           // Jtx
+      matA.at<float>(i, 5) = coeff.y;           // Jty
+      matB.at<float>(i, 0) = -coeff.intensity;  // -f
     }
 
     cv::transpose(matA, matAt);
-    matAtA = matAt * matA;
-    matAtB = matAt * matB;
+    matAtA = matAt * matA;  // JTJ
+    matAtB = matAt * matB;  // -JTf
     cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
 
     if (iterCount == 0) {
       cv::Mat matE(1, 6, CV_32F, cv::Scalar::all(0));
       cv::Mat matV(6, 6, CV_32F, cv::Scalar::all(0));
       cv::Mat matV2(6, 6, CV_32F, cv::Scalar::all(0));
-
+      // 对近似的Hessian矩阵求特征值和特征向量
+      // matE特征值,matV是特征向量
+      // 退化方向只与原始的约束方向A有关，与原始约束的位置b无关
+      // 算这个的目的是要判断退化，即约束中较小的偏移会导致解所在的局部区域发生较大的变化
       cv::eigen(matAtA, matE, matV);
       matV.copyTo(matV2);
 
       isDegenerate = false;
+      //初次优化时，特征值门限设置为100，小于这个值认为是退化了
       float eignThre[6] = {100, 100, 100, 100, 100, 100};
       for (int i = 5; i >= 0; i--) {
         if (matE.at<float>(0, i) < eignThre[i]) {
@@ -1391,6 +1450,8 @@ class mapOptimization : public ParamServer {
           break;
         }
       }
+      // 参考 https://zhuanlan.zhihu.com/p/258159552
+      // 对于退化方向，我们不考虑，直接丢弃，只考虑非退化方向解的增量
       matP = matV.inv() * matV2;
     }
 
@@ -1413,7 +1474,7 @@ class mapOptimization : public ParamServer {
     float deltaT = sqrt(pow(matX.at<float>(3, 0) * 100, 2) +
                         pow(matX.at<float>(4, 0) * 100, 2) +
                         pow(matX.at<float>(5, 0) * 100, 2));
-
+    // 旋转或者平移量足够小就停止这次迭代过程
     if (deltaR < 0.05 && deltaT < 0.05) {
       return true;  // converged
     }
@@ -1500,7 +1561,8 @@ class mapOptimization : public ParamServer {
         transformTobeMapped[1] = pitchMid;
       }
     }
-
+    // 更新当前帧位姿的roll, pitch, z坐标；因为是小车，roll、pitch是相对稳定的，
+    // 不会有很大变动，一定程度上可以信赖imu的数据，z是进行高度约束
     transformTobeMapped[0] =
         constraintTransformation(transformTobeMapped[0], rotation_tollerance);
     transformTobeMapped[1] =
@@ -1542,6 +1604,12 @@ class mapOptimization : public ParamServer {
     return true;
   }
 
+  //这个是要加入激光里程计因子，给图优化的模型gtSAMgraph
+  //如果暂时还没有关键帧，就把当前激光系统状态transformTobeMapped，
+  //打包成一个PriorFactor加入到gtSAMgraph里。如果目前已经有关键帧了，
+  //就把最后一个关键帧，和当前状态transformTobeMapped计算一个增量，
+  // 把这个增量打包成一个BetweenFactor，加入到gtSAMgraph里头去。
+  // initialEstimate代表变量初值，用transformTobeMapped赋值
   void addOdomFactor() {
     if (cloudKeyPoses3D->points.empty()) {
       noiseModel::Diagonal::shared_ptr priorNoise =
@@ -1578,6 +1646,7 @@ class mapOptimization : public ParamServer {
     }
 
     // pose covariance small, no need to correct
+    // 位姿的协方差很小（x，y的协方差阈值小于25）
     if (poseCovariance(3, 3) < poseCovThreshold &&
         poseCovariance(4, 4) < poseCovThreshold)
       return;
@@ -1588,6 +1657,7 @@ class mapOptimization : public ParamServer {
     while (!gpsQueue.empty()) {
       if (gpsQueue.front().header.stamp.toSec() < timeLaserInfoCur - 0.2) {
         // message too old
+        // 当前帧0.2s以前的不要
         gpsQueue.pop_front();
       } else if (gpsQueue.front().header.stamp.toSec() >
                  timeLaserInfoCur + 0.2) {
@@ -1658,6 +1728,7 @@ class mapOptimization : public ParamServer {
   }
 
   void saveKeyFramesAndFactor() {
+    // 计算当前帧和前一帧位姿变换，如果太小不设关键帧。默认是角度<0.2，距离<1m，两者不满足其一就保存
     if (saveFrame() == false) return;
 
     // odom factor
@@ -1693,6 +1764,7 @@ class mapOptimization : public ParamServer {
     Pose3 latestEstimate;
 
     isamCurrentEstimate = isam->calculateEstimate();
+    // 优化后的 lidar 的 map 坐标
     latestEstimate =
         isamCurrentEstimate.at<Pose3>(isamCurrentEstimate.size() - 1);
     // cout << "****************************************************" << endl;
@@ -1745,6 +1817,9 @@ class mapOptimization : public ParamServer {
     updatePath(thisPose6D);
   }
 
+  // 如果发现回环的话，就把历史关键帧通通更新一遍。
+  // cloudKeyPoses3D和cloudKeyPoses6D，这俩保存位置和位姿的变量仍然保留着更新前的关键帧位姿。
+  // 所以就根据更新结果，把他俩更新一遍。
   void correctPoses() {
     if (cloudKeyPoses3D->points.empty()) return;
 
@@ -1783,7 +1858,7 @@ class mapOptimization : public ParamServer {
   void updatePath(const PointTypePose& pose_in) {
     geometry_msgs::PoseStamped pose_stamped;
     pose_stamped.header.stamp = ros::Time().fromSec(pose_in.time);
-    pose_stamped.header.frame_id = odometryFrame;
+    pose_stamped.header.frame_id = odometryFrame;  // 默认为 odom，即 map 坐标系
     pose_stamped.pose.position.x = pose_in.x;
     pose_stamped.pose.position.y = pose_in.y;
     pose_stamped.pose.position.z = pose_in.z;
@@ -1810,9 +1885,10 @@ class mapOptimization : public ParamServer {
         tf::createQuaternionMsgFromRollPitchYaw(transformTobeMapped[0],
                                                 transformTobeMapped[1],
                                                 transformTobeMapped[2]);
+    // 发布全局优化后的激光里程计到 lio_sam/mapping/odometry 话题
     pubLaserOdometryGlobal.publish(laserOdometryROS);
 
-    // Publish TF
+    // Publish lidar_link 的里程计 TF
     static tf::TransformBroadcaster br;
     tf::Transform t_odom_to_lidar = tf::Transform(
         tf::createQuaternionFromRPY(transformTobeMapped[0],
@@ -1870,22 +1946,28 @@ class mapOptimization : public ParamServer {
       laserOdomIncremental.pose.pose.orientation =
           tf::createQuaternionMsgFromRollPitchYaw(roll, pitch, yaw);
       if (isDegenerate)
+        // covariance[0] 记录是否退化
         laserOdomIncremental.pose.covariance[0] = 1;
       else
         laserOdomIncremental.pose.covariance[0] = 0;
     }
+    //发布激光ICP里程计到 lio_sam/mapping/odometry_incremental 话题
     pubLaserOdometryIncremental.publish(laserOdomIncremental);
   }
 
   void publishFrames() {
     if (cloudKeyPoses3D->points.empty()) return;
     // publish key poses
+    // 发布关键帧3D位置集合到 lio_sam/mapping/trajectory
     publishCloud(pubKeyPoses, cloudKeyPoses3D, timeLaserInfoStamp,
                  odometryFrame);
     // Publish surrounding key frames
+    // 发布局部降采样平面点到 lio_sam/mapping/map_local
     publishCloud(pubRecentKeyFrames, laserCloudSurfFromMapDS,
                  timeLaserInfoStamp, odometryFrame);
     // publish registered key frame
+    // 发布当前帧的下采样角点和平面点（map 系下）到
+    // lio_sam/mapping/cloud_registered
     if (pubRecentKeyFrame.getNumSubscribers() != 0) {
       pcl::PointCloud<PointType>::Ptr cloudOut(
           new pcl::PointCloud<PointType>());
@@ -1896,6 +1978,8 @@ class mapOptimization : public ParamServer {
                    odometryFrame);
     }
     // publish registered high-res raw cloud
+    // 发布原始点云经过配准的点云（map系下）到
+    // lio_sam/mapping/cloud_registered_raw
     if (pubCloudRegisteredRaw.getNumSubscribers() != 0) {
       pcl::PointCloud<PointType>::Ptr cloudOut(
           new pcl::PointCloud<PointType>());
@@ -1906,14 +1990,17 @@ class mapOptimization : public ParamServer {
                    odometryFrame);
     }
     // publish path
+    // 发布轨迹到 lio_sam/mapping/path
     if (pubPath.getNumSubscribers() != 0) {
       globalPath.header.stamp = timeLaserInfoStamp;
       globalPath.header.frame_id = odometryFrame;
       pubPath.publish(globalPath);
     }
     // publish SLAM infomation for 3rd-party usage
+    // 发布到 lio_sam/mapping/slam_info
     static int lastSLAMInfoPubSize = -1;
     if (pubSLAMInfo.getNumSubscribers() != 0) {
+      // 关键帧数量变化且有订阅才发布
       if (lastSLAMInfoPubSize != cloudKeyPoses6D->size()) {
         lio_sam::cloud_info slamInfo;
         slamInfo.header.stamp = timeLaserInfoStamp;
@@ -1921,8 +2008,10 @@ class mapOptimization : public ParamServer {
             new pcl::PointCloud<PointType>());
         *cloudOut += *laserCloudCornerLastDS;
         *cloudOut += *laserCloudSurfLastDS;
+        // 发布当前帧的角点和面点（lidar系下）
         slamInfo.key_frame_cloud = publishCloud(ros::Publisher(), cloudOut,
                                                 timeLaserInfoStamp, lidarFrame);
+        // 发布关键帧的6D位姿集合
         slamInfo.key_frame_poses =
             publishCloud(ros::Publisher(), cloudKeyPoses6D, timeLaserInfoStamp,
                          odometryFrame);
@@ -1930,6 +2019,7 @@ class mapOptimization : public ParamServer {
             new pcl::PointCloud<PointType>());
         *localMapOut += *laserCloudCornerFromMapDS;
         *localMapOut += *laserCloudSurfFromMapDS;
+        // 发布局部地图 （最近的一些关键帧处的角点和面点）
         slamInfo.key_frame_map = publishCloud(
             ros::Publisher(), localMapOut, timeLaserInfoStamp, odometryFrame);
         pubSLAMInfo.publish(slamInfo);
