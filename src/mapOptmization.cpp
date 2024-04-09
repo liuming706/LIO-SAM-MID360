@@ -1898,7 +1898,8 @@ class mapOptimization : public ParamServer {
                     transformTobeMapped[5]));
     tf::StampedTransform trans_odom_to_lidar = tf::StampedTransform(
         t_odom_to_lidar, timeLaserInfoStamp, odometryFrame, "lidar_link");
-    br.sendTransform(trans_odom_to_lidar);
+    // NOTE(LM): 暂时注释
+    //  br.sendTransform(trans_odom_to_lidar);
 
     // Publish odometry for ROS (incremental)
     static bool lastIncreOdomPubFlag = false;

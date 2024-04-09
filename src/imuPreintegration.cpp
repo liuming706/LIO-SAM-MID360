@@ -128,6 +128,7 @@ class TransformFusion : public ParamServer {
     if (lidarFrame != baselinkFrame) tCur = tCur * lidar2Baselink;
     tf::StampedTransform odom_2_baselink = tf::StampedTransform(
         tCur, odomMsg->header.stamp, odometryFrame, baselinkFrame);
+    // NOTE(LM): 防止tf冲突，暂时注释
     tfOdom2BaseLink.sendTransform(odom_2_baselink);
 
     // publish IMU path
